@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">短剧护盾</string>
+    <string name="window_title">短剧护盾 - DramaShield</string>
+    <string name="accessibility_service_label">短剧护盾 · 弹窗净化</string>
+    <string name="accessibility_desc">用于识别短剧播放中的广告并自动跳过/关闭，同时可过滤红包、插屏广告弹窗。仅在您勾选的白名单应用前台时工作，全部数据保存在本机。</string>
+</resources>
