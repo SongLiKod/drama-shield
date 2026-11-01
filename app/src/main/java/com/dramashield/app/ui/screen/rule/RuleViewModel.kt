@@ -67,6 +67,10 @@ class RuleViewModel @Inject constructor(
         initialValue = RuleUiState()
     )
 
+    init {
+        viewModelScope.launch { configRepository.ensureDefaultCustomFilterKeywords() }
+    }
+
     fun setRuleEnabled(ruleId: String, enabled: Boolean) {
         viewModelScope.launch {
             runCatching { ruleRepository.setRuleEnabled(ruleId, enabled) }
@@ -139,6 +143,13 @@ class RuleViewModel @Inject constructor(
         viewModelScope.launch {
             configRepository.removeCustomFilterKeyword(keyword)
             eventsChannel.send(RuleEvent.Message("已删除：$keyword"))
+        }
+    }
+
+    fun restoreDefaultCustomFilterKeywords() {
+        viewModelScope.launch {
+            configRepository.restoreDefaultCustomFilterKeywords()
+            eventsChannel.send(RuleEvent.Message("已恢复内置跳过文字"))
         }
     }
 

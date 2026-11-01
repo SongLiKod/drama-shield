@@ -31,7 +31,10 @@ class ConfigRepositoryImpl @Inject constructor(
         .distinctUntilChanged()
 
     override val customFilterKeywords: Flow<Set<String>> = settingsDataStore.data
-        .map { it[SettingsDataStore.Keys.CUSTOM_FILTER_KEYWORDS] ?: emptySet() }
+        .map {
+            it[SettingsDataStore.Keys.CUSTOM_FILTER_KEYWORDS]
+                ?: AppConstants.DEFAULT_CUSTOM_FILTER_KEYWORDS
+        }
         .distinctUntilChanged()
 
     override val skipPlaybackAds: Flow<Boolean> = settingsDataStore.data
@@ -114,7 +117,36 @@ class ConfigRepositoryImpl @Inject constructor(
     }
 
     override suspend fun clearCustomFilterKeywords() {
-        settingsDataStore.update { it[SettingsDataStore.Keys.CUSTOM_FILTER_KEYWORDS] = emptySet() }
+        settingsDataStore.update {
+            it[SettingsDataStore.Keys.CUSTOM_FILTER_KEYWORDS] = emptySet()
+            it[SettingsDataStore.Keys.CUSTOM_FILTER_DEFAULTS_VERSION] = DEFAULTS_VERSION
+        }
+    }
+
+    /**
+     * 老用户升级时把内置跳过文字补进现有列表；只执行一次，之后用户删除的默认项不会自动回来。
+     */
+    override suspend fun ensureDefaultCustomFilterKeywords() {
+        settingsDataStore.update { preferences ->
+            if ((preferences[SettingsDataStore.Keys.CUSTOM_FILTER_DEFAULTS_VERSION] ?: 0) <
+                DEFAULTS_VERSION
+            ) {
+                val current = preferences[SettingsDataStore.Keys.CUSTOM_FILTER_KEYWORDS]
+                    ?: emptySet()
+                preferences[SettingsDataStore.Keys.CUSTOM_FILTER_KEYWORDS] =
+                    current + AppConstants.DEFAULT_CUSTOM_FILTER_KEYWORDS
+                preferences[SettingsDataStore.Keys.CUSTOM_FILTER_DEFAULTS_VERSION] =
+                    DEFAULTS_VERSION
+            }
+        }
+    }
+
+    override suspend fun restoreDefaultCustomFilterKeywords() {
+        settingsDataStore.update {
+            it[SettingsDataStore.Keys.CUSTOM_FILTER_KEYWORDS] =
+                AppConstants.DEFAULT_CUSTOM_FILTER_KEYWORDS
+            it[SettingsDataStore.Keys.CUSTOM_FILTER_DEFAULTS_VERSION] = DEFAULTS_VERSION
+        }
     }
 
     override suspend fun setSkipPlaybackAds(enabled: Boolean) {
@@ -169,5 +201,6 @@ class ConfigRepositoryImpl @Inject constructor(
         const val MIN_INTERVAL = 200L
         const val MAX_INTERVAL = 2000L
         const val DEFAULT_INTERVAL = 500L
+        private const val DEFAULTS_VERSION = 1
     }
 }

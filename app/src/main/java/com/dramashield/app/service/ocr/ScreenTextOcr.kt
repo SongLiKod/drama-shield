@@ -47,8 +47,9 @@ class ScreenTextOcr(private val service: AccessibilityService) {
                 object : AccessibilityService.TakeScreenshotCallback {
                     override fun onSuccess(screenshot: AccessibilityService.ScreenshotResult) {
                         var softwareBitmap: Bitmap? = null
+                        var hardwareBitmap: Bitmap? = null
                         try {
-                            val hardwareBitmap = Bitmap.wrapHardwareBuffer(
+                            hardwareBitmap = Bitmap.wrapHardwareBuffer(
                                 screenshot.hardwareBuffer,
                                 screenshot.colorSpace
                             )
@@ -56,6 +57,8 @@ class ScreenTextOcr(private val service: AccessibilityService) {
                         } catch (throwable: Throwable) {
                             AppLogger.e("OCR screenshot convert failed", throwable)
                         } finally {
+                            // 硬件位图、硬件缓冲区都只用于本次识别，转换完立即释放。
+                            runCatching { hardwareBitmap?.recycle() }
                             runCatching { screenshot.hardwareBuffer.close() }
                         }
 
@@ -65,31 +68,40 @@ class ScreenTextOcr(private val service: AccessibilityService) {
                             return
                         }
 
-                        val scaled = scaleDown(bitmap)
-                        if (scaled !== bitmap) bitmap.recycle()
+                        var scaled: Bitmap? = null
+                        try {
+                            val ocrBitmap = scaleDown(bitmap)
+                            scaled = ocrBitmap
+                            if (ocrBitmap !== bitmap) bitmap.recycle()
 
-                        recognizer.process(InputImage.fromBitmap(scaled, 0))
-                            .addOnSuccessListener { result ->
-                                try {
-                                    val text = result.text
-                                    val nowMs = System.currentTimeMillis()
-                                    if (nowMs - lastTextLogAt > 10_000L) {
-                                        lastTextLogAt = nowMs
-                                        AppLogger.d("OCR captured chars=${text.length}")
+                            recognizer.process(InputImage.fromBitmap(ocrBitmap, 0))
+                                .addOnSuccessListener { result ->
+                                    try {
+                                        val text = result.text
+                                        val nowMs = System.currentTimeMillis()
+                                        if (nowMs - lastTextLogAt > 10_000L) {
+                                            lastTextLogAt = nowMs
+                                            AppLogger.d("OCR captured chars=${text.length}")
+                                        }
+                                        if (text.isNotBlank()) onRecognized(text)
+                                    } catch (throwable: Throwable) {
+                                        AppLogger.e("OCR text callback failed", throwable)
+                                    } finally {
+                                        runCatching { ocrBitmap.recycle() }
+                                        busy.set(false)
                                     }
-                                    if (text.isNotBlank()) onRecognized(text)
-                                } catch (throwable: Throwable) {
-                                    AppLogger.e("OCR text callback failed", throwable)
-                                } finally {
-                                    runCatching { scaled.recycle() }
+                                }
+                                .addOnFailureListener { throwable ->
+                                    AppLogger.e("OCR recognize failed", throwable)
+                                    runCatching { ocrBitmap.recycle() }
                                     busy.set(false)
                                 }
-                            }
-                            .addOnFailureListener { throwable ->
-                                AppLogger.e("OCR recognize failed", throwable)
-                                runCatching { scaled.recycle() }
-                                busy.set(false)
-                            }
+                        } catch (throwable: Throwable) {
+                            AppLogger.e("OCR process failed", throwable)
+                            runCatching { scaled?.recycle() }
+                            if (scaled == null) runCatching { bitmap.recycle() }
+                            busy.set(false)
+                        }
                     }
 
                     override fun onFailure(errorCode: Int) {

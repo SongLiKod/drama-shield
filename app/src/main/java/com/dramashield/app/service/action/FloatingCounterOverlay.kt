@@ -30,9 +30,10 @@ class FloatingCounterOverlay(private val service: AccessibilityService) {
     private var view: TextView? = null
     private var params: WindowManager.LayoutParams? = null
     private var windowManager: WindowManager? = null
-    private var detectedCount: Int = prefs.getInt(KEY_DETECTED, 0)
-    private var hitCount: Int = prefs.getInt(KEY_HIT, 0)
-    private var swipeCount: Int = prefs.getInt(KEY_SWIPE, prefs.getInt(KEY_LEGACY_COUNT, 0))
+    private var detectedCount: Int = prefs.getInt(KEY_DETECTED, 0).coerceAtLeast(0) % COUNT_CYCLE
+    private var hitCount: Int = prefs.getInt(KEY_HIT, 0).coerceAtLeast(0) % COUNT_CYCLE
+    private var swipeCount: Int =
+        prefs.getInt(KEY_SWIPE, prefs.getInt(KEY_LEGACY_COUNT, 0)).coerceAtLeast(0) % COUNT_CYCLE
 
     fun show() {
         handler.post {
@@ -106,7 +107,7 @@ class FloatingCounterOverlay(private val service: AccessibilityService) {
 
     fun recordDetection() {
         handler.post {
-            detectedCount += 1
+            detectedCount = (detectedCount + 1) % COUNT_CYCLE
             prefs.edit().putInt(KEY_DETECTED, detectedCount).apply()
             updateText()
         }
@@ -114,7 +115,7 @@ class FloatingCounterOverlay(private val service: AccessibilityService) {
 
     fun recordHit() {
         handler.post {
-            hitCount += 1
+            hitCount = (hitCount + 1) % COUNT_CYCLE
             prefs.edit().putInt(KEY_HIT, hitCount).apply()
             updateText()
         }
@@ -122,7 +123,7 @@ class FloatingCounterOverlay(private val service: AccessibilityService) {
 
     fun recordSwipe() {
         handler.post {
-            swipeCount += 1
+            swipeCount = (swipeCount + 1) % COUNT_CYCLE
             prefs.edit().putInt(KEY_SWIPE, swipeCount).apply()
             updateText()
         }
@@ -132,7 +133,7 @@ class FloatingCounterOverlay(private val service: AccessibilityService) {
         view?.text = label()
     }
 
-    private fun label(): String = "检测 $detectedCount · 命中 $hitCount · 上滑 $swipeCount"
+    private fun label(): String = "测 $detectedCount · 中 $hitCount · 滑 $swipeCount"
 
     private fun attachDrag(
         counterView: TextView,
@@ -212,5 +213,6 @@ class FloatingCounterOverlay(private val service: AccessibilityService) {
         const val KEY_LEGACY_COUNT = "swipe_count_legacy"
         const val KEY_X = "x"
         const val KEY_Y = "y"
+        const val COUNT_CYCLE = 1000
     }
 }

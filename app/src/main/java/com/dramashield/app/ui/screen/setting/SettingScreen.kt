@@ -595,7 +595,7 @@ private fun SwipeTuningCard(
         Spacer(modifier = Modifier.height(12.dp))
         SettingSwitchRow(
             title = "显示悬浮计数条",
-            subtitle = "仅在已选择的白名单应用内显示，半透明可拖动；展示检测、命中、上滑三项次数。",
+            subtitle = "仅在已选择的白名单应用内显示，半透明可拖动；显示测/中/滑，计数到 999 后回到 0。",
             checked = showCounter,
             onCheckedChange = onShowCounterChange
         )

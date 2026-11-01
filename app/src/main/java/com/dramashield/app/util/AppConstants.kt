@@ -11,6 +11,20 @@ object AppConstants {
     const val MAX_CUSTOM_FILTER_KEYWORDS = 100
     const val MAX_CUSTOM_FILTER_LENGTH = 30
 
+    /** 内置自定义跳过文字，用户可逐条删除，也可一键恢复。 */
+    val DEFAULT_CUSTOM_FILTER_KEYWORDS: Set<String> = linkedSetOf(
+        "查看详情",
+        "点击进入游戏",
+        "点击进入直播间",
+        "极速下载",
+        "立即下载",
+        "免费下载",
+        "下载领取",
+        "应用点亮",
+        "上滑继续观看短剧",
+        "上滑继续看短剧"
+    )
+
     const val DISCLAIMER =
         "本工具仅提供本地广告跳过与弹窗过滤，不提供影视资源，不破解付费内容。使用本工具产生的任何风险与后果由用户自行承担。"
 
