@@ -190,7 +190,8 @@ fun RuleScreen(
                     input = customInput,
                     onInputChange = { customInput = it },
                     onAdd = submitCustomKeyword,
-                    onRemove = viewModel::removeCustomFilterKeyword
+                    onRemove = viewModel::removeCustomFilterKeyword,
+                    onRestore = viewModel::restoreDefaultCustomFilterKeywords
                 )
             }
 
@@ -256,7 +257,8 @@ private fun CustomFilterCard(
     input: String,
     onInputChange: (String) -> Unit,
     onAdd: () -> Unit,
-    onRemove: (String) -> Unit
+    onRemove: (String) -> Unit,
+    onRestore: () -> Unit
 ) {
     SectionCard(
         title = "自定义跳过文字",
@@ -269,7 +271,7 @@ private fun CustomFilterCard(
         }
     ) {
         Text(
-            text = "直接输入弹窗里看到的文字即可，无需 JSON。此列表仅用于弹窗过滤；播放广告跳过使用广告页识别 + 上滑手势，不依赖关键词。",
+            text = "内置默认列表，可逐条点 × 删除；恢复默认会重新加入全部内置文字。命中后用于广告页识别和屏幕 OCR。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -348,6 +350,14 @@ private fun CustomFilterCard(
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End
+        ) {
+            TextButton(onClick = onRestore) {
+                Text(text = "恢复默认")
+            }
+        }
     }
 }
 

@@ -49,6 +49,7 @@ class SettingsDataStore @Inject constructor(
         val RULES_JSON = stringPreferencesKey("rules_json")
         val FIRST_LAUNCH_GUIDE_SHOWN = booleanPreferencesKey("first_launch_guide_shown")
         val CUSTOM_FILTER_KEYWORDS = stringSetPreferencesKey("custom_filter_keywords")
+        val CUSTOM_FILTER_DEFAULTS_VERSION = intPreferencesKey("custom_filter_defaults_version")
         val SKIP_PLAYBACK_ADS = booleanPreferencesKey("skip_playback_ads")
         val SWIPE_START_MIN_PERCENT = intPreferencesKey("swipe_start_min_percent")
         val SWIPE_START_MAX_PERCENT = intPreferencesKey("swipe_start_max_percent")

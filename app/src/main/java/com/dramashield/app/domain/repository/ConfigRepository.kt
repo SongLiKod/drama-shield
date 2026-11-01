@@ -26,6 +26,8 @@ interface ConfigRepository {
     suspend fun addCustomFilterKeyword(keyword: String)
     suspend fun removeCustomFilterKeyword(keyword: String)
     suspend fun clearCustomFilterKeywords()
+    suspend fun ensureDefaultCustomFilterKeywords()
+    suspend fun restoreDefaultCustomFilterKeywords()
     suspend fun setSkipPlaybackAds(enabled: Boolean)
     suspend fun setSwipeStartMinPercent(percent: Int)
     suspend fun setSwipeStartMaxPercent(percent: Int)

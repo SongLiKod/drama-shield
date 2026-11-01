@@ -157,6 +157,7 @@ class DramaShieldAccessibilityService : AccessibilityService() {
         ServiceStateHolder.setRunning(true)
         AppLogger.d("Accessibility service connected")
         observeConfiguration()
+        serviceScope.launch { configRepository.ensureDefaultCustomFilterKeywords() }
         startForegroundWatchdog()
         startScreenOcrLoop()
         serviceScope.launch {
