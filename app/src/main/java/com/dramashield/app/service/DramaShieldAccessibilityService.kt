@@ -108,10 +108,17 @@ class DramaShieldAccessibilityService : AccessibilityService() {
     private var lastAdSkipLogAt: Long = 0L
 
     @Volatile
-    private var ocrCustomTextSeenAt: Long = 0L
+    private var ocrSwipeSentForCurrentAd: Boolean = false
+
+    private var ocrMissCount: Int = 0
 
     @Volatile
-    private var ocrSwipeSentForCurrentAd: Boolean = false
+    private var ocrAdAttempts: Int = 0
+
+    @Volatile
+    private var lastOcrSwipeStartedAt: Long = 0L
+
+    private var lastEpisodeToken: String? = null
 
     private var lastOcrRequestLogAt: Long = 0L
 
@@ -554,20 +561,54 @@ class DramaShieldAccessibilityService : AccessibilityService() {
             val hit = targetHit ?: matchedKeywords.firstOrNull() ?: builtInHit
             val now = SystemClock.uptimeMillis()
             if (hit == null) {
-                // 连续一段时间看不到广告文字，才允许下一次广告再上滑，避免同一广告被反复上滑。
-                if (ocrSwipeSentForCurrentAd && now - ocrCustomTextSeenAt > OCR_AD_GONE_RESET_MS) {
-                    ocrSwipeSentForCurrentAd = false
+                // 连续几次看不到自定义文字，才认为这个广告结束，允许下一个广告再上滑。
+                if (ocrSwipeSentForCurrentAd) {
+                    ocrMissCount += 1
+                    if (ocrMissCount >= OCR_AD_GONE_MISSES) {
+                        resetOcrAdSession()
+                    }
                 }
                 return@scan
             }
-            ocrCustomTextSeenAt = now
-            if (ocrSwipeSentForCurrentAd) return@scan
-            ocrSwipeSentForCurrentAd = true
+            ocrMissCount = 0
+            if (ocrSwipeSentForCurrentAd) {
+                // 同一个广告第一次上滑可能没有生效；允许有限次数重试，但绝不无限连滑。
+                val canRetry = now - lastOcrSwipeStartedAt >= OCR_RETRY_AFTER_MS &&
+                    ocrAdAttempts < MAX_OCR_ATTEMPTS_PER_AD
+                if (!canRetry) return@scan
+                AppLogger.d("OCR retry ad swipe attempt=${ocrAdAttempts + 1}")
+            }
             if (matchedKeywords.size > 1) {
                 AppLogger.d("OCR matched keywords=${matchedKeywords.joinToString(" | ")}")
             }
             AppLogger.d("OCR hit「$hit」package=$packageName")
-            swipeToNextEpisode(packageName, "屏幕文字「$hit」")
+            if (swipeToNextEpisode(packageName, "屏幕文字「$hit」")) {
+                ocrSwipeSentForCurrentAd = true
+                ocrAdAttempts += 1
+                lastOcrSwipeStartedAt = now
+            }
+        }
+    }
+
+    private fun resetOcrAdSession() {
+        ocrSwipeSentForCurrentAd = false
+        ocrAdAttempts = 0
+        ocrMissCount = 0
+    }
+
+    /**
+     * 用户手动切集或广告跳转后，集数会变化；此时必须清空“当前广告已上滑”状态，
+     * 否则下一轮广告会被当成同一个广告而不再处理。
+     */
+    private fun updateEpisodeSession(nodes: List<NodeSnapshot>) {
+        val token = nodes.asSequence()
+            .filter { it.isVisible }
+            .mapNotNull { EPISODE_REGEX.find(it.text)?.value }
+            .firstOrNull()
+            ?: return
+        if (token != lastEpisodeToken) {
+            lastEpisodeToken = token
+            resetOcrAdSession()
         }
     }
 
@@ -602,12 +643,12 @@ class DramaShieldAccessibilityService : AccessibilityService() {
     /**
      * 识别到广告后只做一次上滑：不点击、不返回、不滚动。
      */
-    private fun swipeToNextEpisode(packageName: String, reason: String) {
-        if (!skipPlaybackAds || !shouldScan(packageName)) return
-        if (adSwipeJob?.isActive == true) return
+    private fun swipeToNextEpisode(packageName: String, reason: String): Boolean {
+        if (!skipPlaybackAds || !shouldScan(packageName)) return false
+        if (adSwipeJob?.isActive == true) return false
 
         val now = System.currentTimeMillis()
-        if (now - lastAdSwipeAt < AD_SWIPE_COOLDOWN_MS) return
+        if (now - lastAdSwipeAt < AD_SWIPE_COOLDOWN_MS) return false
         lastAdSwipeAt = now
 
         adSwipeJob = serviceScope.launch {
@@ -643,6 +684,7 @@ class DramaShieldAccessibilityService : AccessibilityService() {
             if (swipeSuccess) floatingCounterOverlay.recordSwipe()
             logAdSkip(packageName = packageName, success = swipeSuccess, detail = detail)
         }
+        return true
     }
 
     private fun nextSwipeSpec(screen: ScreenSize): SwipeSpec {
@@ -736,6 +778,7 @@ class DramaShieldAccessibilityService : AccessibilityService() {
                 val nodes = NodeScanner.scan(root)
                 val screen = currentScreenSize()
                 try {
+                    updateEpisodeSession(nodes)
                     // 检测次数 = 实际完成的无障碍扫描次数（正常页面也会增长）。
                     floatingCounterOverlay.recordDetection()
                     // 广告页优先：只上滑，不进入任何关键词点击/关闭逻辑。
@@ -891,7 +934,9 @@ class DramaShieldAccessibilityService : AccessibilityService() {
         const val DEFAULT_SCAN_INTERVAL = 500L
         const val SCREEN_OCR_INTERVAL_MS = 1_200L
         const val FOREGROUND_WATCHDOG_INTERVAL_MS = 2_500L
-        const val OCR_AD_GONE_RESET_MS = 20_000L
+        const val OCR_AD_GONE_MISSES = 3
+        const val OCR_RETRY_AFTER_MS = 4_000L
+        const val MAX_OCR_ATTEMPTS_PER_AD = 2
         const val MIN_SCAN_INTERVAL = 200L
         const val MAX_SCAN_INTERVAL = 2000L
         const val PARSE_ERROR_RULE_ID = "parse_error"
