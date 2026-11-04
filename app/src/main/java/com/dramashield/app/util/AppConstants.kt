@@ -31,6 +31,9 @@ object AppConstants {
     const val PRIVACY_NOTE =
         "所有配置、规则与跳过日志均仅保存在本机，不上传任何用户数据，也不会申请通讯录、位置等无关敏感权限。"
 
+    const val OCR_PRIVACY_NOTE =
+        "屏幕文字识别只在白名单应用内运行；截图仅存在于内存中，识别完成后立即释放，不保存、不上传，也不会写入相册。"
+
     const val ABOUT_DESCRIPTION =
         "短剧护盾依靠无障碍服务，自动识别并跳过短剧播放中的广告，同时支持红包/广告弹窗过滤，让观看体验更清爽。"
 }

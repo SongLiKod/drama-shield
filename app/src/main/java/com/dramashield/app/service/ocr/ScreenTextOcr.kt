@@ -33,7 +33,10 @@ class ScreenTextOcr(private val service: AccessibilityService) {
      * 异步截屏并识别。识别成功后在主线程回调完整文字。
      * 同一时间只允许一个 OCR 任务，避免连续截图拖慢服务。
      */
-    fun scan(onRecognized: (String) -> Unit) {
+    fun scan(
+        onRecognized: (String) -> Unit,
+        onError: ((String) -> Unit)? = null
+    ) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
         val now = SystemClock.uptimeMillis()
         if (now - lastAttemptAt < MIN_INTERVAL_MS) return
@@ -56,6 +59,7 @@ class ScreenTextOcr(private val service: AccessibilityService) {
                             softwareBitmap = hardwareBitmap?.copy(Bitmap.Config.ARGB_8888, false)
                         } catch (throwable: Throwable) {
                             AppLogger.e("OCR screenshot convert failed", throwable)
+                            onError?.invoke("截图转换失败")
                         } finally {
                             // 硬件位图、硬件缓冲区都只用于本次识别，转换完立即释放。
                             runCatching { hardwareBitmap?.recycle() }
@@ -93,11 +97,13 @@ class ScreenTextOcr(private val service: AccessibilityService) {
                                 }
                                 .addOnFailureListener { throwable ->
                                     AppLogger.e("OCR recognize failed", throwable)
+                                    onError?.invoke("OCR 识别失败")
                                     runCatching { ocrBitmap.recycle() }
                                     busy.set(false)
                                 }
                         } catch (throwable: Throwable) {
                             AppLogger.e("OCR process failed", throwable)
+                            onError?.invoke("OCR 处理失败")
                             runCatching { scaled?.recycle() }
                             if (scaled == null) runCatching { bitmap.recycle() }
                             busy.set(false)
@@ -110,6 +116,7 @@ class ScreenTextOcr(private val service: AccessibilityService) {
                         if (nowMs - lastFailureLogAt > 30_000L) {
                             lastFailureLogAt = nowMs
                             AppLogger.e("OCR screenshot failed code=$errorCode")
+                            onError?.invoke("截图失败 code=$errorCode")
                         }
                     }
                 }
@@ -117,6 +124,7 @@ class ScreenTextOcr(private val service: AccessibilityService) {
         }.onFailure { throwable ->
             busy.set(false)
             AppLogger.e("OCR screenshot request failed", throwable)
+            onError?.invoke("截图请求失败")
         }
     }
 

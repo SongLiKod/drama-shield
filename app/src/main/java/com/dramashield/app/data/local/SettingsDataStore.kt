@@ -59,5 +59,6 @@ class SettingsDataStore @Inject constructor(
         val SWIPE_DURATION_MAX_MS = longPreferencesKey("swipe_duration_max_ms")
         val SHOW_SWIPE_TRACE = booleanPreferencesKey("show_swipe_trace")
         val SHOW_FLOATING_COUNTER = booleanPreferencesKey("show_floating_counter")
+        val OCR_ENABLED = booleanPreferencesKey("ocr_enabled")
     }
 }

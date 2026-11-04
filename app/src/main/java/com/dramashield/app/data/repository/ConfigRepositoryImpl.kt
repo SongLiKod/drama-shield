@@ -73,6 +73,10 @@ class ConfigRepositoryImpl @Inject constructor(
         .map { it[SettingsDataStore.Keys.SHOW_FLOATING_COUNTER] ?: true }
         .distinctUntilChanged()
 
+    override val ocrEnabled: Flow<Boolean> = settingsDataStore.data
+        .map { it[SettingsDataStore.Keys.OCR_ENABLED] ?: true }
+        .distinctUntilChanged()
+
     override suspend fun setGlobalSwitch(enabled: Boolean) {
         settingsDataStore.update { it[SettingsDataStore.Keys.GLOBAL_SWITCH] = enabled }
     }
@@ -195,6 +199,10 @@ class ConfigRepositoryImpl @Inject constructor(
 
     override suspend fun setShowFloatingCounter(enabled: Boolean) {
         settingsDataStore.update { it[SettingsDataStore.Keys.SHOW_FLOATING_COUNTER] = enabled }
+    }
+
+    override suspend fun setOcrEnabled(enabled: Boolean) {
+        settingsDataStore.update { it[SettingsDataStore.Keys.OCR_ENABLED] = enabled }
     }
 
     companion object {

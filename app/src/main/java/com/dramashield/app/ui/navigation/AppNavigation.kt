@@ -13,7 +13,9 @@ import androidx.compose.material.icons.automirrored.filled.Rule
 import androidx.compose.material.icons.automirrored.outlined.Article
 import androidx.compose.material.icons.automirrored.outlined.Rule
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
@@ -34,6 +36,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.dramashield.app.ui.screen.about.AboutScreen
+import com.dramashield.app.ui.screen.diagnostics.DiagnosticsScreen
 import com.dramashield.app.ui.screen.home.HomeScreen
 import com.dramashield.app.ui.screen.log.LogScreen
 import com.dramashield.app.ui.screen.rule.RuleScreen
@@ -45,6 +48,7 @@ object Routes {
     const val LOG = "log"
     const val SETTING = "setting"
     const val ABOUT = "about"
+    const val DIAGNOSTICS = "diagnostics"
 }
 
 private data class BottomTab(
@@ -58,6 +62,7 @@ private val bottomTabs = listOf(
     BottomTab(Routes.HOME, "首页", Icons.Filled.Home, Icons.Outlined.Home),
     BottomTab(Routes.RULE, "规则", Icons.AutoMirrored.Filled.Rule, Icons.AutoMirrored.Outlined.Rule),
     BottomTab(Routes.LOG, "日志", Icons.AutoMirrored.Filled.Article, Icons.AutoMirrored.Outlined.Article),
+    BottomTab(Routes.DIAGNOSTICS, "诊断", Icons.Filled.BugReport, Icons.Outlined.BugReport),
     BottomTab(Routes.SETTING, "设置", Icons.Filled.Settings, Icons.Outlined.Settings)
 )
 
@@ -149,6 +154,9 @@ fun DramaShieldApp() {
             }
             composable(Routes.LOG) {
                 LogScreen()
+            }
+            composable(Routes.DIAGNOSTICS) {
+                DiagnosticsScreen()
             }
             composable(Routes.SETTING) {
                 SettingScreen(

@@ -129,6 +129,21 @@ class FloatingCounterOverlay(private val service: AccessibilityService) {
         }
     }
 
+    fun resetCounts() {
+        handler.post {
+            detectedCount = 0
+            hitCount = 0
+            swipeCount = 0
+            prefs.edit()
+                .putInt(KEY_DETECTED, 0)
+                .putInt(KEY_HIT, 0)
+                .putInt(KEY_SWIPE, 0)
+                .apply()
+            updateText()
+            AppLogger.d("Floating counter reset")
+        }
+    }
+
     private fun updateText() {
         view?.text = label()
     }
@@ -146,6 +161,8 @@ class FloatingCounterOverlay(private val service: AccessibilityService) {
         var startX = 0
         var startY = 0
         var dragging = false
+        var longPressed = false
+        var longPressRunnable: Runnable? = null
         val touchSlop = dp(6)
 
         counterView.setOnTouchListener { _, event ->
@@ -156,14 +173,24 @@ class FloatingCounterOverlay(private val service: AccessibilityService) {
                     startX = layoutParams.x
                     startY = layoutParams.y
                     dragging = false
+                    longPressed = false
+                    longPressRunnable = Runnable {
+                        if (!dragging) {
+                            longPressed = true
+                            resetCounts()
+                        }
+                    }.also { handler.postDelayed(it, LONG_PRESS_MS) }
                     true
                 }
 
                 MotionEvent.ACTION_MOVE -> {
                     val dx = event.rawX - downRawX
                     val dy = event.rawY - downRawY
-                    if (!dragging && (kotlin.math.abs(dx) > touchSlop || kotlin.math.abs(dy) > touchSlop)) {
+                    if (!longPressed && !dragging &&
+                        (kotlin.math.abs(dx) > touchSlop || kotlin.math.abs(dy) > touchSlop)
+                    ) {
                         dragging = true
+                        longPressRunnable?.let { handler.removeCallbacks(it) }
                     }
                     if (dragging) {
                         val maxX = (screen.first - counterView.width).coerceAtLeast(0)
@@ -176,6 +203,7 @@ class FloatingCounterOverlay(private val service: AccessibilityService) {
                 }
 
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    longPressRunnable?.let { handler.removeCallbacks(it) }
                     if (dragging) {
                         prefs.edit()
                             .putInt(KEY_X, layoutParams.x)
@@ -214,5 +242,6 @@ class FloatingCounterOverlay(private val service: AccessibilityService) {
         const val KEY_X = "x"
         const val KEY_Y = "y"
         const val COUNT_CYCLE = 1000
+        const val LONG_PRESS_MS = 650L
     }
 }

@@ -24,6 +24,7 @@ import com.dramashield.app.service.detector.DetectionResult
 import com.dramashield.app.service.detector.NodeScanner
 import com.dramashield.app.service.detector.NodeSnapshot
 import com.dramashield.app.service.detector.RedValleyDetector
+import com.dramashield.app.service.diagnostics.DiagnosticStateHolder
 import com.dramashield.app.service.ocr.ScreenTextOcr
 import com.dramashield.app.service.rule.BuiltInRules
 import com.dramashield.app.util.KnownPackages
@@ -102,7 +103,16 @@ class DramaShieldAccessibilityService : AccessibilityService() {
     private var showFloatingCounter: Boolean = true
 
     @Volatile
+    private var ocrEnabled: Boolean = true
+
+    @Volatile
     private var lastAdSwipeAt: Long = 0L
+
+    @Volatile
+    private var lastSwipeAttemptAt: Long = 0L
+
+    @Volatile
+    private var lastSwipeVerifiedForBackoff: Boolean? = null
 
     @Volatile
     private var lastAdSkipLogAt: Long = 0L
@@ -162,6 +172,9 @@ class DramaShieldAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         ServiceStateHolder.setRunning(true)
+        DiagnosticStateHolder.update {
+            it.copy(serviceRunning = true, ocrEnabled = ocrEnabled)
+        }
         AppLogger.d("Accessibility service connected")
         observeConfiguration()
         serviceScope.launch { configRepository.ensureDefaultCustomFilterKeywords() }
@@ -193,6 +206,15 @@ class DramaShieldAccessibilityService : AccessibilityService() {
             }
 
             val packageName = resolveEventPackage(accessibilityEvent) ?: return
+            val eventNow = SystemClock.uptimeMillis()
+            DiagnosticStateHolder.update {
+                it.copy(
+                    lastEventAt = eventNow,
+                    lastEventSummary = "type=${accessibilityEvent.eventType}, " +
+                        "class=${accessibilityEvent.className}, " +
+                        "pkg=$packageName"
+                )
+            }
             val canScan = shouldScan(packageName)
             if (canScan) {
                 val now = SystemClock.uptimeMillis()
@@ -227,12 +249,14 @@ class DramaShieldAccessibilityService : AccessibilityService() {
 
     override fun onInterrupt() {
         ServiceStateHolder.setRunning(false)
+        DiagnosticStateHolder.update { it.copy(serviceRunning = false) }
         stopForegroundScan()
         AppLogger.d("Accessibility service interrupted")
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
         ServiceStateHolder.setRunning(false)
+        DiagnosticStateHolder.update { it.copy(serviceRunning = false) }
         stopForegroundScan()
         return super.onUnbind(intent)
     }
@@ -242,6 +266,7 @@ class DramaShieldAccessibilityService : AccessibilityService() {
         floatingCounterOverlay.hide()
         screenTextOcr.close()
         ServiceStateHolder.setRunning(false)
+        DiagnosticStateHolder.update { it.copy(serviceRunning = false) }
         pendingScanJob?.cancel()
         foregroundScanJob?.cancel()
         screenOcrJob?.cancel()
@@ -309,6 +334,12 @@ class DramaShieldAccessibilityService : AccessibilityService() {
                     updateFloatingCounterVisibility()
                 }
             }
+            launch {
+                configRepository.ocrEnabled.collect { enabled ->
+                    ocrEnabled = enabled
+                    DiagnosticStateHolder.update { it.copy(ocrEnabled = enabled) }
+                }
+            }
         }
     }
 
@@ -330,6 +361,13 @@ class DramaShieldAccessibilityService : AccessibilityService() {
     private fun setForegroundPackage(packageName: String) {
         if (foregroundPackage == packageName) return
         foregroundPackage = packageName
+        DiagnosticStateHolder.update {
+            it.copy(
+                foregroundPackage = packageName,
+                foregroundAppName = resolveAppName(packageName),
+                whiteListed = true
+            )
+        }
         AppLogger.d("Start foreground scan package=$packageName")
         updateFloatingCounterVisibility()
         foregroundScanJob?.cancel()
@@ -361,6 +399,13 @@ class DramaShieldAccessibilityService : AccessibilityService() {
 
     private fun stopForegroundScan() {
         foregroundPackage = null
+        DiagnosticStateHolder.update {
+            it.copy(
+                foregroundPackage = null,
+                foregroundAppName = null,
+                whiteListed = false
+            )
+        }
         foregroundScanJob?.cancel()
         foregroundScanJob = null
         updateFloatingCounterVisibility()
@@ -536,64 +581,83 @@ class DramaShieldAccessibilityService : AccessibilityService() {
      * 只在白名单应用、开启播放广告跳过、并且配置了自定义文字时运行。
      */
     private fun scanVisibleCustomText(packageName: String) {
-        if (!skipPlaybackAds || customFilterKeywords.isEmpty()) return
+        if (!skipPlaybackAds || !ocrEnabled || customFilterKeywords.isEmpty()) return
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
         val nowLog = SystemClock.uptimeMillis()
         if (nowLog - lastOcrRequestLogAt > 10_000L) {
             lastOcrRequestLogAt = nowLog
             AppLogger.d("OCR request package=$packageName keywords=${customFilterKeywords.size}")
         }
-        screenTextOcr.scan { rawText ->            if (!serviceScope.isActive || !globalSwitch || !skipPlaybackAds) return@scan
-            if (!shouldScan(packageName)) return@scan
-            val normalizedScreen = normalizeForMatch(rawText)
-            val matchedKeywords = customFilterKeywords.filter { keyword ->
-                keyword.isNotBlank() && normalizeForMatch(keyword) in normalizedScreen
-            }
-            val targetHit = matchedKeywords.firstOrNull { keyword ->
-                val normalized = normalizeForMatch(keyword)
-                "上滑继续看短剧" in normalized || "上滑继续观看短剧" in normalized
-            }
-            val builtInHit = when {
-                "上滑继续看短剧" in normalizedScreen -> "上滑继续看短剧"
-                "上滑继续观看短剧" in normalizedScreen -> "上滑继续观看短剧"
-                else -> null
-            }
-            val hit = targetHit ?: matchedKeywords.firstOrNull() ?: builtInHit
-            val now = SystemClock.uptimeMillis()
-            if (hit == null) {
-                // 连续几次看不到自定义文字，才认为这个广告结束，允许下一个广告再上滑。
-                if (ocrSwipeSentForCurrentAd) {
-                    ocrMissCount += 1
-                    if (ocrMissCount >= OCR_AD_GONE_MISSES) {
-                        resetOcrAdSession()
-                    }
+        screenTextOcr.scan(
+            onRecognized = { rawText ->
+                DiagnosticStateHolder.update {
+                    it.copy(
+                        lastOcrAt = System.currentTimeMillis(),
+                        lastOcrText = rawText.take(300),
+                        lastOcrError = null
+                    )
                 }
-                return@scan
+                if (!serviceScope.isActive || !globalSwitch || !skipPlaybackAds || !ocrEnabled) {
+                    return@scan
+                }
+                if (!shouldScan(packageName)) return@scan
+                val normalizedScreen = normalizeForMatch(rawText)
+                val matchedKeywords = customFilterKeywords.filter { keyword ->
+                    keyword.isNotBlank() && normalizeForMatch(keyword) in normalizedScreen
+                }
+                val targetHit = matchedKeywords.firstOrNull { keyword ->
+                    val normalized = normalizeForMatch(keyword)
+                    "上滑继续看短剧" in normalized || "上滑继续观看短剧" in normalized
+                }
+                val builtInHit = when {
+                    "上滑继续看短剧" in normalizedScreen -> "上滑继续看短剧"
+                    "上滑继续观看短剧" in normalizedScreen -> "上滑继续观看短剧"
+                    else -> null
+                }
+                val hit = targetHit ?: matchedKeywords.firstOrNull() ?: builtInHit
+                val now = SystemClock.uptimeMillis()
+                if (hit == null) {
+                    // 连续几次看不到自定义文字，才认为这个广告结束，允许下一个广告再上滑。
+                    if (ocrSwipeSentForCurrentAd) {
+                        ocrMissCount += 1
+                        if (ocrMissCount >= OCR_AD_GONE_MISSES) {
+                            resetOcrAdSession()
+                        }
+                    }
+                    return@scan
+                }
+                ocrMissCount = 0
+                if (ocrSwipeSentForCurrentAd) {
+                    // 同一个广告第一次上滑可能没有生效；允许有限次数重试，但绝不无限连滑。
+                    val canRetry = now - lastOcrSwipeStartedAt >= OCR_RETRY_AFTER_MS &&
+                        ocrAdAttempts < MAX_OCR_ATTEMPTS_PER_AD
+                    if (!canRetry) return@scan
+                    AppLogger.d("OCR retry ad swipe attempt=${ocrAdAttempts + 1}")
+                }
+                if (matchedKeywords.size > 1) {
+                    AppLogger.d("OCR matched keywords=${matchedKeywords.joinToString(" | ")}")
+                }
+                AppLogger.d("OCR hit「$hit」package=$packageName")
+                DiagnosticStateHolder.update {
+                    it.copy(lastAdReason = "屏幕文字「$hit」")
+                }
+                if (swipeToNextEpisode(packageName, "屏幕文字「$hit」")) {
+                    ocrSwipeSentForCurrentAd = true
+                    ocrAdAttempts += 1
+                    lastOcrSwipeStartedAt = now
+                }
+            },
+            onError = { message ->
+                DiagnosticStateHolder.update { it.copy(lastOcrError = message) }
             }
-            ocrMissCount = 0
-            if (ocrSwipeSentForCurrentAd) {
-                // 同一个广告第一次上滑可能没有生效；允许有限次数重试，但绝不无限连滑。
-                val canRetry = now - lastOcrSwipeStartedAt >= OCR_RETRY_AFTER_MS &&
-                    ocrAdAttempts < MAX_OCR_ATTEMPTS_PER_AD
-                if (!canRetry) return@scan
-                AppLogger.d("OCR retry ad swipe attempt=${ocrAdAttempts + 1}")
-            }
-            if (matchedKeywords.size > 1) {
-                AppLogger.d("OCR matched keywords=${matchedKeywords.joinToString(" | ")}")
-            }
-            AppLogger.d("OCR hit「$hit」package=$packageName")
-            if (swipeToNextEpisode(packageName, "屏幕文字「$hit」")) {
-                ocrSwipeSentForCurrentAd = true
-                ocrAdAttempts += 1
-                lastOcrSwipeStartedAt = now
-            }
-        }
+        )
     }
 
     private fun resetOcrAdSession() {
         ocrSwipeSentForCurrentAd = false
         ocrAdAttempts = 0
         ocrMissCount = 0
+        lastSwipeVerifiedForBackoff = null
     }
 
     /**
@@ -601,11 +665,7 @@ class DramaShieldAccessibilityService : AccessibilityService() {
      * 否则下一轮广告会被当成同一个广告而不再处理。
      */
     private fun updateEpisodeSession(nodes: List<NodeSnapshot>) {
-        val token = nodes.asSequence()
-            .filter { it.isVisible }
-            .mapNotNull { EPISODE_REGEX.find(it.text)?.value }
-            .firstOrNull()
-            ?: return
+        val token = extractEpisodeToken(nodes) ?: return
         if (token != lastEpisodeToken) {
             lastEpisodeToken = token
             resetOcrAdSession()
@@ -649,11 +709,28 @@ class DramaShieldAccessibilityService : AccessibilityService() {
 
         val now = System.currentTimeMillis()
         if (now - lastAdSwipeAt < AD_SWIPE_COOLDOWN_MS) return false
+        if (lastSwipeVerifiedForBackoff == false &&
+            now - lastSwipeAttemptAt < FAILED_SWIPE_BACKOFF_MS
+        ) {
+            return false
+        }
         lastAdSwipeAt = now
+        lastSwipeAttemptAt = now
+        lastSwipeVerifiedForBackoff = null
+        DiagnosticStateHolder.update {
+            it.copy(
+                lastSwipeAt = now,
+                lastSwipeReason = reason,
+                lastSwipeDispatch = null,
+                lastSwipeVerified = null,
+                lastSwipeDetail = "准备上滑"
+            )
+        }
 
         adSwipeJob = serviceScope.launch {
             val screen = currentScreenSize()
             val spec = nextSwipeSpec(screen)
+            val beforeEpisode = lastEpisodeToken ?: readEpisodeToken()
             AppLogger.d("Swipe trace enabled=$showSwipeTrace")
             if (showSwipeTrace) {
                 swipeTraceOverlay.show(
@@ -669,23 +746,71 @@ class DramaShieldAccessibilityService : AccessibilityService() {
                     "(${spec.startX},${spec.startY})->(${spec.endX},${spec.endY}), " +
                     "duration=${spec.durationMs}ms"
             )
-            val swipeSuccess = clickExecutor.swipe(
+            val swipeDispatched = clickExecutor.swipe(
                 startX = spec.startX.toFloat(),
                 startY = spec.startY.toFloat(),
                 endX = spec.endX.toFloat(),
                 endY = spec.endY.toFloat(),
                 durationMs = spec.durationMs
             )
-            AppLogger.d("Ad swipe up result: success=$swipeSuccess")
+            AppLogger.d("Ad swipe up dispatched: success=$swipeDispatched")
+
+            var afterEpisode = beforeEpisode
+            var verified = false
+            if (swipeDispatched) {
+                // dispatchGesture 返回 true 只表示系统接收了手势，必须等页面真正变化才算成功。
+                delay(SWIPE_VERIFY_DELAY_MS)
+                afterEpisode = readEpisodeToken()
+                verified = beforeEpisode != null &&
+                    afterEpisode != null &&
+                    beforeEpisode != afterEpisode
+            }
+            val verifyText = when {
+                !swipeDispatched -> "手势未发出"
+                beforeEpisode == null -> "上滑前未读取到集数，无法验证"
+                afterEpisode == null -> "上滑后未读取到集数，无法验证"
+                beforeEpisode == afterEpisode -> "集数未变化（$beforeEpisode）"
+                else -> "集数 $beforeEpisode → $afterEpisode"
+            }
+            AppLogger.d("Ad swipe up verified=$verified, $verifyText")
+            lastSwipeVerifiedForBackoff = verified
+
             val detail = "广告页规则 playback_ad_skip，命中「$reason」；" +
                 "上滑 (${spec.startX},${spec.startY})→(${spec.endX},${spec.endY})，" +
-                "起点 ${spec.startPercent}%、终点 ${spec.endPercent}%，时长 ${spec.durationMs}ms"
+                "起点 ${spec.startPercent}%、终点 ${spec.endPercent}%，" +
+                "时长 ${spec.durationMs}ms；验证：$verifyText"
             floatingCounterOverlay.recordHit()
-            if (swipeSuccess) floatingCounterOverlay.recordSwipe()
-            logAdSkip(packageName = packageName, success = swipeSuccess, detail = detail)
+            if (verified) floatingCounterOverlay.recordSwipe()
+            logAdSkip(packageName = packageName, success = verified, detail = detail)
+            DiagnosticStateHolder.update {
+                it.copy(
+                    lastSwipeAt = System.currentTimeMillis(),
+                    lastSwipeReason = reason,
+                    lastSwipeDispatch = swipeDispatched,
+                    lastSwipeVerified = verified,
+                    lastSwipeDetail = verifyText
+                )
+            }
         }
         return true
     }
+
+    /**
+     * 读取当前页面集数，用于验证上滑是否真正切集。
+     */
+    private fun readEpisodeToken(): String? {
+        val root = runCatching { rootInActiveWindow }.getOrNull() ?: return null
+        val nodes = runCatching { NodeScanner.scan(root) }.getOrDefault(emptyList())
+        val token = extractEpisodeToken(nodes)
+        recycleNodes(root, nodes)
+        return token
+    }
+
+    private fun extractEpisodeToken(nodes: List<NodeSnapshot>): String? =
+        nodes.asSequence()
+            .filter { it.isVisible }
+            .mapNotNull { EPISODE_REGEX.find(it.text)?.value }
+            .firstOrNull()
 
     private fun nextSwipeSpec(screen: ScreenSize): SwipeSpec {
         val startMin = swipeStartMinPercent.coerceIn(0, 100)
@@ -779,10 +904,19 @@ class DramaShieldAccessibilityService : AccessibilityService() {
                 val screen = currentScreenSize()
                 try {
                     updateEpisodeSession(nodes)
+                    DiagnosticStateHolder.update {
+                        it.copy(
+                            lastScanAt = System.currentTimeMillis(),
+                            lastScanNodeCount = nodes.size
+                        )
+                    }
                     // 检测次数 = 实际完成的无障碍扫描次数（正常页面也会增长）。
                     floatingCounterOverlay.recordDetection()
                     // 广告页优先：只上滑，不进入任何关键词点击/关闭逻辑。
                     val adReason = detectPlaybackAd(nodes, screen.height, packageName)
+                    if (adReason != null) {
+                        DiagnosticStateHolder.update { it.copy(lastAdReason = adReason) }
+                    }
                     if (skipPlaybackAds && adReason != null) {
                         swipeToNextEpisode(packageName, adReason)
                         return@launch
@@ -937,6 +1071,8 @@ class DramaShieldAccessibilityService : AccessibilityService() {
         const val OCR_AD_GONE_MISSES = 3
         const val OCR_RETRY_AFTER_MS = 4_000L
         const val MAX_OCR_ATTEMPTS_PER_AD = 2
+        const val SWIPE_VERIFY_DELAY_MS = 1_200L
+        const val FAILED_SWIPE_BACKOFF_MS = 4_000L
         const val MIN_SCAN_INTERVAL = 200L
         const val MAX_SCAN_INTERVAL = 2000L
         const val PARSE_ERROR_RULE_ID = "parse_error"

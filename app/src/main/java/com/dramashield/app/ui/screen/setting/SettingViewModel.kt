@@ -32,7 +32,8 @@ data class SettingUiState(
     val swipeDurationMinMs: Long = 60L,
     val swipeDurationMaxMs: Long = 120L,
     val showSwipeTrace: Boolean = true,
-    val showFloatingCounter: Boolean = true
+    val showFloatingCounter: Boolean = true,
+    val ocrEnabled: Boolean = true
 )
 
 private data class GestureConfig(
@@ -105,6 +106,8 @@ class SettingViewModel @Inject constructor(
         state.copy(showSwipeTrace = showTrace)
     }.combine(configRepository.showFloatingCounter) { state, showCounter ->
         state.copy(showFloatingCounter = showCounter)
+    }.combine(configRepository.ocrEnabled) { state, ocrEnabled ->
+        state.copy(ocrEnabled = ocrEnabled)
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000L),
@@ -175,6 +178,10 @@ class SettingViewModel @Inject constructor(
 
     fun setShowFloatingCounter(enabled: Boolean) {
         viewModelScope.launch { configRepository.setShowFloatingCounter(enabled) }
+    }
+
+    fun setOcrEnabled(enabled: Boolean) {
+        viewModelScope.launch { configRepository.setOcrEnabled(enabled) }
     }
 
     fun resetSwipeGesture() {

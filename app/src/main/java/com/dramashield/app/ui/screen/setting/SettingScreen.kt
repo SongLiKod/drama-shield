@@ -267,6 +267,14 @@ fun SettingScreen(
             }
 
             item {
+                OcrRecognitionCard(
+                    enabled = uiState.ocrEnabled,
+                    supported = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R,
+                    onEnabledChange = viewModel::setOcrEnabled
+                )
+            }
+
+            item {
                 SwipeTuningCard(
                     uiState = uiState,
                     onStartRangeChange = { min, max ->
@@ -595,7 +603,7 @@ private fun SwipeTuningCard(
         Spacer(modifier = Modifier.height(12.dp))
         SettingSwitchRow(
             title = "显示悬浮计数条",
-            subtitle = "仅在已选择的白名单应用内显示，半透明可拖动；显示测/中/滑，计数到 999 后回到 0。",
+            subtitle = "仅在已选择的白名单应用内显示，半透明可拖动；显示测/中/滑，计数到 999 后回到 0，长按悬浮条可清零。",
             checked = showCounter,
             onCheckedChange = onShowCounterChange
         )
@@ -613,6 +621,33 @@ private fun PlaybackAdSkipCard(
             subtitle = "检测到广告播放页后，直接向上滑动进入下一集，不点击页面上的广告按钮；部分广告需等待倒计时结束。",
             checked = enabled,
             onCheckedChange = onEnabledChange
+        )
+    }
+}
+
+@Composable
+private fun OcrRecognitionCard(
+    enabled: Boolean,
+    supported: Boolean,
+    onEnabledChange: (Boolean) -> Unit
+) {
+    SectionCard(title = "屏幕文字识别（OCR）") {
+        SettingSwitchRow(
+            title = "识别自绘广告文字",
+            subtitle = if (supported) {
+                "用于识别“上滑继续看短剧”等无障碍树读不到的广告文字。关闭后只使用无障碍节点识别。"
+            } else {
+                "当前系统低于 Android 11，不支持无障碍截图 OCR，只能使用无障碍节点识别。"
+            },
+            checked = enabled && supported,
+            onCheckedChange = onEnabledChange,
+            enabled = supported
+        )
+        Spacer(modifier = Modifier.height(10.dp))
+        Text(
+            text = AppConstants.OCR_PRIVACY_NOTE,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }

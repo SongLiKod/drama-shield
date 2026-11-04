@@ -18,6 +18,7 @@ interface ConfigRepository {
     val swipeDurationMaxMs: Flow<Long>
     val showSwipeTrace: Flow<Boolean>
     val showFloatingCounter: Flow<Boolean>
+    val ocrEnabled: Flow<Boolean>
 
     suspend fun setGlobalSwitch(enabled: Boolean)
     suspend fun setScanInterval(intervalMs: Long)
@@ -37,4 +38,5 @@ interface ConfigRepository {
     suspend fun setSwipeDurationMaxMs(durationMs: Long)
     suspend fun setShowSwipeTrace(enabled: Boolean)
     suspend fun setShowFloatingCounter(enabled: Boolean)
+    suspend fun setOcrEnabled(enabled: Boolean)
 }
